@@ -76,6 +76,7 @@
 #include "xdg-shell-client-protocol.h"
 #include "tablet-unstable-v2-client-protocol.h"
 #include "pointer-constraints-unstable-v1-client-protocol.h"
+#include "pointer-gestures-unstable-v1-client-protocol.h"
 #include "relative-pointer-unstable-v1-client-protocol.h"
 #include "idle-inhibit-unstable-v1-client-protocol.h"
 #include "fractional-scale-v1-client-protocol.h"
@@ -1285,6 +1286,131 @@ static const struct wl_touch_listener touch_listener = {
 };
 
 static void
+gesture_pinch_begin(void *data, struct zwp_pointer_gesture_pinch_v1 *, uint32_t id, uint32_t, struct wl_surface *, uint32_t)
+{
+    struct display* display = (struct display*)data;
+
+    create_touch_id(display, id);
+    create_touch_id(display, id + 1);
+
+    display->zoomGestureEventSerial = id;
+    display->zoomGestureCenter = display->ptrPrvX;
+    display->zoomGestureInitLength = -1;
+}
+
+static void
+gesture_pinch_update(void *data, struct zwp_pointer_gesture_pinch_v1 *, uint32_t,
+            wl_fixed_t, wl_fixed_t, wl_fixed_t scale, wl_fixed_t)
+{
+    struct display* display = (struct display*)data;
+    struct input_event event[11];
+    struct timespec rt;
+    double zoom_scale;
+    int touch_id[2];
+    unsigned int res, n = 0;
+
+    if (ensure_pipe(display, INPUT_TOUCH))
+        return;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &rt) == -1) {
+        ALOGE("%s:%d error in touch clock_gettime: %s",
+              __FILE__, __LINE__, strerror(errno));
+    }
+
+    zoom_scale = wl_fixed_to_double(scale);
+
+    touch_id[0] = get_touch_id(display, display->zoomGestureEventSerial);
+    touch_id[1] = get_touch_id(display, display->zoomGestureEventSerial + 1);
+
+    if (display->zoomGestureInitLength == -1) {
+        display->zoomGestureInitLength = (zoom_scale < 1) ?
+            property_get_int32("persist.waydroid.zoom_out_gesture_init_length", 400) :
+            property_get_int32("persist.waydroid.zoom_in_gesture_init_length", 200);
+
+        ADD_EVENT(EV_ABS, ABS_MT_SLOT, touch_id[0]);
+        ADD_EVENT(EV_ABS, ABS_MT_TRACKING_ID, touch_id[0]);
+        ADD_EVENT(EV_ABS, ABS_MT_POSITION_X, display->zoomGestureCenter - (display->zoomGestureInitLength / 2));
+        ADD_EVENT(EV_ABS, ABS_MT_POSITION_Y, display->ptrPrvY);
+        ADD_EVENT(EV_ABS, ABS_MT_PRESSURE, 50);
+
+        ADD_EVENT(EV_ABS, ABS_MT_SLOT, touch_id[1]);
+        ADD_EVENT(EV_ABS, ABS_MT_TRACKING_ID, touch_id[1]);
+        ADD_EVENT(EV_ABS, ABS_MT_POSITION_X, display->zoomGestureCenter + (display->zoomGestureInitLength / 2));
+        ADD_EVENT(EV_ABS, ABS_MT_POSITION_Y, display->ptrPrvY);
+        ADD_EVENT(EV_ABS, ABS_MT_PRESSURE, 50);
+
+        ADD_EVENT(EV_SYN, SYN_REPORT, 0);
+
+        res = write(display->input_fd[INPUT_TOUCH], &event, sizeof(event));
+        if (res < sizeof(event))
+            ALOGE("Failed to write event for InputFlinger: %s", strerror(errno));
+
+        n = 0;
+    }
+
+    ADD_EVENT(EV_ABS, ABS_MT_SLOT, touch_id[0]);
+    ADD_EVENT(EV_ABS, ABS_MT_TRACKING_ID, touch_id[0]);
+    ADD_EVENT(EV_ABS, ABS_MT_POSITION_X, display->zoomGestureCenter - (display->zoomGestureInitLength * zoom_scale / 2));
+    ADD_EVENT(EV_ABS, ABS_MT_POSITION_Y, display->ptrPrvY);
+    ADD_EVENT(EV_ABS, ABS_MT_PRESSURE, 50);
+
+    ADD_EVENT(EV_ABS, ABS_MT_SLOT, touch_id[1]);
+    ADD_EVENT(EV_ABS, ABS_MT_TRACKING_ID, touch_id[1]);
+    ADD_EVENT(EV_ABS, ABS_MT_POSITION_X, display->zoomGestureCenter + (display->zoomGestureInitLength * zoom_scale / 2));
+    ADD_EVENT(EV_ABS, ABS_MT_POSITION_Y, display->ptrPrvY);
+    ADD_EVENT(EV_ABS, ABS_MT_PRESSURE, 50);
+
+    ADD_EVENT(EV_SYN, SYN_REPORT, 0);
+
+    res = write(display->input_fd[INPUT_TOUCH], &event, sizeof(event));
+    if (res < sizeof(event))
+        ALOGE("Failed to write event for InputFlinger: %s", strerror(errno));
+}
+
+static void
+gesture_pinch_end(void *data, struct zwp_pointer_gesture_pinch_v1 *, uint32_t, uint32_t, int)
+{
+    struct display* display = (struct display*)data;
+    struct input_event event[6];
+    struct timespec rt;
+    int touch_id[2];
+    unsigned int res, n = 0;
+
+    if (ensure_pipe(display, INPUT_TOUCH))
+        return;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &rt) == -1) {
+        ALOGE("%s:%d error in touch clock_gettime: %s",
+              __FILE__, __LINE__, strerror(errno));
+    }
+
+    touch_id[0] = get_touch_id(display, display->zoomGestureEventSerial);
+    touch_id[1] = get_touch_id(display, display->zoomGestureEventSerial + 1);
+
+    ADD_EVENT(EV_ABS, ABS_MT_SLOT, touch_id[0]);
+    ADD_EVENT(EV_ABS, ABS_MT_TRACKING_ID, -1);
+    ADD_EVENT(EV_SYN, SYN_REPORT, 0);
+
+    ADD_EVENT(EV_ABS, ABS_MT_SLOT, touch_id[1]);
+    ADD_EVENT(EV_ABS, ABS_MT_TRACKING_ID, -1);
+    ADD_EVENT(EV_SYN, SYN_REPORT, 0);
+
+    if (flush_touch_id(display, display->zoomGestureEventSerial) == -1 ||
+        flush_touch_id(display, display->zoomGestureEventSerial + 1) == -1)
+        return;
+
+    res = write(display->input_fd[INPUT_TOUCH], &event, sizeof(event));
+    if (res < sizeof(event))
+    ALOGE("Failed to write event for InputFlinger: %s", strerror(errno));
+}
+
+static const struct zwp_pointer_gesture_pinch_v1_listener pinch_listener = {
+    gesture_pinch_begin,
+    gesture_pinch_update,
+    gesture_pinch_end,
+};
+
+static void
 xdg_wm_base_ping(void *, struct xdg_wm_base *wm_base, uint32_t serial)
 {
     xdg_wm_base_pong(wm_base, serial);
@@ -1340,6 +1466,19 @@ seat_handle_capabilities(void *data, struct wl_seat *seat, uint32_t wl_caps)
         remove(INPUT_PIPE_NAME[INPUT_TOUCH]);
         wl_touch_destroy(d->touch);
         d->touch = NULL;
+    }
+
+    if (d->pointer_gestures && d->pointer) {
+        if (!(caps & WL_SEAT_CAPABILITY_TOUCH) && !d->touch) {
+            d->input_fd[INPUT_TOUCH] = -1;
+            mkfifo(INPUT_PIPE_NAME[INPUT_TOUCH], S_IRWXO | S_IRWXG | S_IRWXU);
+            chown(INPUT_PIPE_NAME[INPUT_TOUCH], 1000, 1000);
+            for (int i = 0; i < MAX_TOUCHPOINTS; i++)
+                d->touch_id[i] = -1;
+        }
+
+        d->pointer_gesture_pinch = zwp_pointer_gestures_v1_get_pinch_gesture(d->pointer_gestures, d->pointer);
+        zwp_pointer_gesture_pinch_v1_add_listener(d->pointer_gesture_pinch, &pinch_listener, d);
     }
 }
 
@@ -1899,6 +2038,9 @@ registry_handle_global(void *data, struct wl_registry *registry,
     } else if (strcmp(interface, "zwp_pointer_constraints_v1") == 0) {
         d->pointer_constraints = (struct zwp_pointer_constraints_v1 *)wl_registry_bind(
                 registry, id, &zwp_pointer_constraints_v1_interface, 1);
+    } else if (strcmp(interface, "zwp_pointer_gestures_v1") == 0) {
+        d->pointer_gestures = (struct zwp_pointer_gestures_v1 *)wl_registry_bind(
+                registry, id, &zwp_pointer_gestures_v1_interface, 1);
     } else if (strcmp(interface, "zwp_relative_pointer_manager_v1") == 0) {
         d->relative_pointer_manager = (struct zwp_relative_pointer_manager_v1 *)wl_registry_bind(
                 registry, id, &zwp_relative_pointer_manager_v1_interface, 1);

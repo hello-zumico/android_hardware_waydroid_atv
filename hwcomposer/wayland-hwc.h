@@ -321,6 +321,8 @@ struct display {
     struct zwp_tablet_manager_v2* tablet_manager;
     struct zwp_tablet_seat_v2 *tablet_seat;
     struct zwp_pointer_constraints_v1 *pointer_constraints;
+    struct zwp_pointer_gestures_v1 *pointer_gestures;
+    struct zwp_pointer_gesture_pinch_v1 *pointer_gesture_pinch;
     struct zwp_relative_pointer_manager_v1 *relative_pointer_manager;
     struct zwp_relative_pointer_v1 *relative_pointer;
     struct zwp_idle_inhibit_manager_v1 *idle_manager;
@@ -335,6 +337,9 @@ struct display {
     int input_fd[INPUT_TOTAL];
     int ptrPrvX;
     int ptrPrvY;
+    int zoomGestureCenter;
+    int zoomGestureInitLength;
+    int zoomGestureEventSerial;
     double wheelAccumulatorX;
     double wheelAccumulatorY;
     bool wheelEvtIsDiscrete;
