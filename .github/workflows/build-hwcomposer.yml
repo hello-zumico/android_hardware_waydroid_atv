@@ -10,34 +10,65 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
-    container:
-      image: waydroidlinux/docker-android-build:lineage-20
-      options: --user root
+    runs-on: [self-hosted, linux, x64]
 
     steps:
-      - name: Checkout patched hardware repo
-        uses: actions/checkout@v4
-        with:
-          path: hardware/waydroid
-
-      - name: Verify AOSP build env
+      - name: Install build dependencies (once)
         run: |
-          echo "Build tools:" && ls /usr/local/aosp/build/envsetup.sh || true
-          echo "NDK:" && ls /opt/android-ndk*/ndk-build 2>/dev/null | head -1 || true
+          if ! command -v repo &>/dev/null; then
+            curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo
+            chmod +x /usr/local/bin/repo
+          fi
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
+            git git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev \
+            libelf-dev liblz4-tool libsdl1.2-dev libssl-dev libxml2 libxml2-utils \
+            lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev \
+            lib32ncurses5-dev libncurses5 libncurses5-dev \
+            python3-setuptools python3-mako python3-yaml 2>&1 | tail -5
 
-      - name: Build hwcomposer with AOSP soong
+      - name: Init AOSP source (skip if already done)
         run: |
-          cd /usr/local/aosp
+          AOSP_DIR="$HOME/aosp-waydroid-atv"
+          mkdir -p "$AOSP_DIR"
+          cd "$AOSP_DIR"
+          if [ ! -d ".repo" ]; then
+            git config --global user.email "ci@localhost"
+            git config --global user.name "CI"
+            repo init -u https://github.com/LineageOS/android.git -b lineage-20.0 --git-lfs --depth=1
+            wget -qO - https://raw.githubusercontent.com/WayDroid-ATV/android_vendor_waydroid/lineage-20/manifest_scripts/generate-manifest.sh | bash
+          fi
+
+      - name: Sync AOSP source
+        run: |
+          cd "$HOME/aosp-waydroid-atv"
+          repo sync -j$(nproc) -c --no-clone-bundle --no-tags 2>&1 | tail -10
+
+      - name: Overlay patched hardware/waydroid
+        run: |
+          rm -rf "$HOME/aosp-waydroid-atv/hardware/waydroid"
+          git clone --depth=1 --branch lineage-20-live-resize \
+            https://github.com/hello-zumico/android_hardware_waydroid_atv.git \
+            "$HOME/aosp-waydroid-atv/hardware/waydroid"
+
+      - name: Enable ccache
+        run: |
+          ccache -M 20G
+          echo "USE_CCACHE=1" >> $GITHUB_ENV
+          echo "CCACHE_EXEC=/usr/bin/ccache" >> $GITHUB_ENV
+
+      - name: Build hwcomposer.waydroid
+        run: |
+          cd "$HOME/aosp-waydroid-atv"
           source build/envsetup.sh
-          lunch waydroid_arm64-user
-          # Only rebuild the hardware/waydroid module
-          cp -r $GITHUB_WORKSPACE/hardware/waydroid hardware/waydroid
-          m hwcomposer.waydroid 2>&1 | tail -40
+          lunch lineage_waydroid_tv_x86_64-userdebug
+          m hwcomposer.waydroid -j$(nproc) 2>&1 | tail -50
 
       - name: Collect artifact
         run: |
-          find /usr/local/aosp/out -name "hwcomposer.waydroid.so" -exec cp {} /tmp/hwcomposer.waydroid.so \;
+          SO=$(find "$HOME/aosp-waydroid-atv/out" -name "hwcomposer.waydroid.so" | head -1)
+          echo "Found: $SO"
+          cp "$SO" /tmp/hwcomposer.waydroid.so
           ls -lh /tmp/hwcomposer.waydroid.so
 
       - name: Upload artifact
