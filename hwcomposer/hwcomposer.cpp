@@ -531,6 +531,8 @@ static void hwc_register_procs(struct hwc_composer_device_1* dev,
                                hwc_procs_t const* procs) {
     auto *pdev = static_cast<waydroid_hwc_composer_device_1 *>(dev);
     pdev->procs = procs;
+    if (pdev->display)
+        pdev->display->sf_procs = procs;
 }
 
 static int hwc_get_display_configs(struct hwc_composer_device_1* dev __unused,

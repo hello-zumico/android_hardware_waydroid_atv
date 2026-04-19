@@ -187,6 +187,35 @@ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
 
     display->req_width = width;
     display->req_height = height;
+
+    /* ── Live resize ─────────────────────────────────────────────────────
+     * Only apply after initial calibration is complete (display->width is
+     * non-zero). Skip if nothing changed to avoid spurious SF wakeups.   */
+    if (!display->width || !display->height)
+        return;
+    if (display->width == (uint32_t)width && display->height == (uint32_t)height)
+        return;
+
+    display->width  = (uint32_t)width;
+    display->height = (uint32_t)height;
+
+    /* Update the logical window geometry reported to the compositor. */
+    if (window->xdg_surface)
+        xdg_surface_set_window_geometry(window->xdg_surface, 0, 0, width, height);
+
+    /* Rescale the Wayland viewport so Android content fills the new size. */
+    if (window->viewport)
+        wp_viewport_set_destination(window->viewport, width, height);
+
+    wl_surface_commit(window->surface);
+
+    /* Wake SurfaceFlinger so it re-queries display attributes and redraws. */
+    if (display->sf_procs) {
+        if (display->sf_procs->hotplug)
+            display->sf_procs->hotplug(display->sf_procs, HWC_DISPLAY_PRIMARY, 1);
+        else if (display->sf_procs->invalidate)
+            display->sf_procs->invalidate(display->sf_procs);
+    }
 }
 
 static void

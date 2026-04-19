@@ -390,6 +390,8 @@ struct display {
 
     bool isMaximized;
     sp<IWaydroidTask> task;
+
+    const hwc_procs_t *sf_procs = nullptr;
 };
 
 void
