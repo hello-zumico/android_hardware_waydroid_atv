@@ -1,0 +1,69 @@
+name: Build patched hwcomposer.waydroid.so
+
+on:
+  push:
+    branches: [lineage-20-live-resize]
+    paths:
+      - 'hwcomposer/**'
+      - '.github/workflows/build-hwcomposer.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    container:
+      image: waydroidlinux/docker-android-build:lineage-20
+      options: --user root
+
+    steps:
+      - name: Checkout patched hardware repo
+        uses: actions/checkout@v4
+        with:
+          path: hardware/waydroid
+
+      - name: Verify AOSP build env
+        run: |
+          echo "Build tools:" && ls /usr/local/aosp/build/envsetup.sh || true
+          echo "NDK:" && ls /opt/android-ndk*/ndk-build 2>/dev/null | head -1 || true
+
+      - name: Build hwcomposer with AOSP soong
+        run: |
+          cd /usr/local/aosp
+          source build/envsetup.sh
+          lunch waydroid_arm64-user
+          # Only rebuild the hardware/waydroid module
+          cp -r $GITHUB_WORKSPACE/hardware/waydroid hardware/waydroid
+          m hwcomposer.waydroid 2>&1 | tail -40
+
+      - name: Collect artifact
+        run: |
+          find /usr/local/aosp/out -name "hwcomposer.waydroid.so" -exec cp {} /tmp/hwcomposer.waydroid.so \;
+          ls -lh /tmp/hwcomposer.waydroid.so
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hwcomposer-waydroid-live-resize
+          path: /tmp/hwcomposer.waydroid.so
+          retention-days: 90
+
+      - name: Create/update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: live-resize-latest
+          name: "Patched hwcomposer (live resize)"
+          body: |
+            Patched `hwcomposer.waydroid.so` with live resize support.
+
+            Built from branch `lineage-20-live-resize`.
+
+            **Install:**
+            ```bash
+            curl -fsSL https://github.com/hello-zumico/android_hardware_waydroid_atv/releases/download/live-resize-latest/hwcomposer.waydroid.so \
+              | sudo tee /var/lib/waydroid/rootfs/vendor/lib64/hw/hwcomposer.waydroid.so > /dev/null
+            sudo systemctl restart waydroid-container.service
+            ```
+          files: /tmp/hwcomposer.waydroid.so
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
