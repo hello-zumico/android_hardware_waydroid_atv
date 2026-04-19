@@ -11,15 +11,22 @@ on:
 jobs:
   build:
     runs-on: [self-hosted, linux, x64]
+    env:
+      PATH: /home/lorna/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
     steps:
       - name: Install build dependencies (once)
         run: |
+          # Install repo tool to user bin (no root needed)
+          mkdir -p "$HOME/.local/bin"
           if ! command -v repo &>/dev/null; then
-            curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo
-            chmod +x /usr/local/bin/repo
+            curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo \
+              -o "$HOME/.local/bin/repo"
+            chmod +x "$HOME/.local/bin/repo"
           fi
-          sudo apt-get install -y --no-install-recommends \
+          export PATH="$HOME/.local/bin:$PATH"
+          # Install build deps - lorna has NOPASSWD sudo for apt via sudoers
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
             git git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev \
             libelf-dev liblz4-tool libsdl1.2-dev libssl-dev libxml2 libxml2-utils \
