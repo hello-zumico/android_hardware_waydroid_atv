@@ -71,7 +71,7 @@ jobs:
         run: |
           cd "$HOME/aosp-waydroid-atv"
           source build/envsetup.sh
-          lunch lineage_waydroid_tv_x86_64-userdebug
+          lunch lineage_gsi_tv_x86_64-userdebug
           m hwcomposer.waydroid -j$(nproc) 2>&1 | tail -50
 
       - name: Collect artifact
