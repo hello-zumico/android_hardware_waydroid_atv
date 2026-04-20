@@ -17,7 +17,6 @@ jobs:
     steps:
       - name: Install build dependencies (once)
         run: |
-          # Install repo tool to user bin (no root needed)
           mkdir -p "$HOME/.local/bin"
           if ! command -v repo &>/dev/null; then
             curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo \
@@ -25,7 +24,6 @@ jobs:
             chmod +x "$HOME/.local/bin/repo"
           fi
           export PATH="$HOME/.local/bin:$PATH"
-          # Install build deps - lorna has NOPASSWD sudo for apt via sudoers
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
             git git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev \
@@ -60,9 +58,14 @@ jobs:
 
       - name: Enable ccache
         run: |
-          ccache -M 20G
-          echo "USE_CCACHE=1" >> $GITHUB_ENV
-          echo "CCACHE_EXEC=/usr/bin/ccache" >> $GITHUB_ENV
+          CCACHE_BIN=$(command -v ccache || true)
+          if [ -n "$CCACHE_BIN" ]; then
+            ccache -M 20G
+            echo "USE_CCACHE=1" >> $GITHUB_ENV
+            echo "CCACHE_EXEC=$CCACHE_BIN" >> $GITHUB_ENV
+          else
+            echo "ccache not found, skipping"
+          fi
 
       - name: Build hwcomposer.waydroid
         run: |
@@ -76,7 +79,6 @@ jobs:
           SO=$(find "$HOME/aosp-waydroid-atv/out" -name "hwcomposer.waydroid.so" | head -1)
           echo "Found: $SO"
           cp "$SO" /tmp/hwcomposer.waydroid.so
-          ls -lh /tmp/hwcomposer.waydroid.so
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
